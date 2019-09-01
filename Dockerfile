@@ -19,7 +19,10 @@ RUN apt-get update \
         libpng-dev ntp unzip make python2.7-dev \
         python-pip re2c supervisor unattended-upgrades whois vim \
         libnotify-bin pv cifs-utils mcrypt bash-completion zsh \
-        graphviz avahi-daemon tshark imagemagick
+        graphviz avahi-daemon tshark imagemagick \
+        gettext locales libfreetype6 libfreetype6-dev \
+        unzip zlib1g-dev openssh-client \
+        --no-install-recommends
 
 # Install PHP Stuffs
 # PHP 7.2
@@ -47,14 +50,11 @@ RUN sed -i "s/error_reporting = .*/error_reporting = E_ALL/" /etc/php/7.2/cli/ph
     && sed -i "s/memory_limit = .*/memory_limit = 512M/" /etc/php/7.2/cli/php.ini \
     && sed -i "s/;date.timezone.*/date.timezone = UTC/" /etc/php/7.2/cli/php.ini
 
-# Install Nginx & PHP-FPM
+# Install PHP-FPM
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
       --allow-downgrades --allow-remove-essential --allow-change-held-packages \
-        nginx php7.2-fpm
-
-# Adjust default nginx port & disable default background services
-RUN sed -i "s/80 default_server/8080 default_server/" /etc/nginx/sites-available/default
+        php7.2-fpm apache2 php7.2-cgi libapache2-mod-fcgid
 
 # Setup Some PHP-FPM Options
 RUN echo "xdebug.remote_enable = 1" >> /etc/php/7.2/mods-available/xdebug.ini \
@@ -79,35 +79,24 @@ RUN printf "[openssl]\n" | tee -a /etc/php/7.2/fpm/php.ini \
 # Disable XDebug On The CLI
 RUN phpdismod -s cli xdebug
 
-# Copy fastcgi_params to Nginx because they broke it on the PPA
-RUN echo 'fastcgi_param	QUERY_STRING		$query_string;\n\
-fastcgi_param	REQUEST_METHOD		$request_method;\n\
-fastcgi_param	CONTENT_TYPE		$content_type;\n\
-fastcgi_param	CONTENT_LENGTH		$content_length;\n\
-fastcgi_param	SCRIPT_FILENAME		$request_filename;\n\
-fastcgi_param	SCRIPT_NAME		$fastcgi_script_name;\n\
-fastcgi_param	REQUEST_URI		$request_uri;\n\
-fastcgi_param	DOCUMENT_URI		$document_uri;\n\
-fastcgi_param	DOCUMENT_ROOT		$document_root;\n\
-fastcgi_param	SERVER_PROTOCOL		$server_protocol;\n\
-fastcgi_param	GATEWAY_INTERFACE	CGI/1.1;\n\
-fastcgi_param	SERVER_SOFTWARE		nginx/$nginx_version;\n\
-fastcgi_param	REMOTE_ADDR		$remote_addr;\n\
-fastcgi_param	REMOTE_PORT		$remote_port;\n\
-fastcgi_param	SERVER_ADDR		$server_addr;\n\
-fastcgi_param	SERVER_PORT		$server_port;\n\
-fastcgi_param	SERVER_NAME		$server_name;\n\
-fastcgi_param	HTTPS			$https if_not_empty;\n\
-fastcgi_param	REDIRECT_STATUS		200;\n' \
->> /etc/nginx/fastcgi_params
+# Enable FPM & other modules for Apache
+RUN a2enconf php7.2-fpm
+RUN a2enmod rewrite headers actions alias proxy proxy_fcgi
 
-# Set The Nginx & PHP-FPM User
-RUN sed -i "s/# server_names_hash_bucket_size.*/server_names_hash_bucket_size 64;/" /etc/nginx/nginx.conf
+# Set default Apache port to 8080
+RUN sed -i 's/Listen\ 80/Listen\ 8080/g' /etc/apache2/ports.conf
+RUN sed -i 's/\*\:80/\*\:8080/g' /etc/apache2/sites-enabled/000-default.conf
+RUN sed -i 's/\/var\/www\/html/\/var\/www\/html\/public\n<Directory \/data\/public>\nAllowOverride All\nRequire all granted\n<\/Directory>\nServerName example.com/g' \
+    /etc/apache2/sites-enabled/000-default.conf
+EXPOSE 8080
 
 # Install SQLite
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
         sqlite3 libsqlite3-dev
+
+# Clean up apt
+RUN rm -r /var/lib/apt/lists/*
 
 # Set workspace & extended INI for flexible config (eg. file upload limit)
 COPY . /var/www/html
@@ -115,13 +104,11 @@ WORKDIR /var/www/html
 
 RUN mkdir -p /run/php
 
-# COPY .docker/extended.php.ini /usr/local/etc/php/conf.d/extended.php.ini
-EXPOSE 8080
+COPY extended.php.ini /etc/php/7.2/fpm/conf.d/extended.php.ini
 
 # RUN composer install
 # RUN chmod -R 777 ./storage
 
 # Supervisor config
-ADD ./supervisord.conf /etc/supervisord.conf
-EXPOSE 80
+COPY ./supervisord.conf /etc/supervisord.conf
 CMD ["/usr/bin/supervisord"]
