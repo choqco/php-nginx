@@ -51,12 +51,10 @@ RUN sed -i "s/error_reporting = .*/error_reporting = E_ALL/" /etc/php/7.2/cli/ph
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
       --allow-downgrades --allow-remove-essential --allow-change-held-packages \
-        nginx php7.2-fpm systemd
+        nginx php7.2-fpm
 
 # Adjust default nginx port & disable default background services
 RUN sed -i "s/80 default_server/8080 default_server/" /etc/nginx/sites-available/default
-RUN systemctl disable nginx
-RUN systemctl disable php7.2-fpm
 
 # Setup Some PHP-FPM Options
 RUN echo "xdebug.remote_enable = 1" >> /etc/php/7.2/mods-available/xdebug.ini \
